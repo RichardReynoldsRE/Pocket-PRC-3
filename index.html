@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Pocket PRC 3.0.0 - Keller Williams</title>
+    <title>Pocket PRC 3.0.1 - Keller Williams</title>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -87,9 +87,18 @@
             </svg>
         );
 
-        const Paperclip = ({ size = 20 }) => (
+        const Camera = ({ size = 24 }) => (
             <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                <circle cx="12" cy="13" r="4"></circle>
+            </svg>
+        );
+
+        const ImageIcon = ({ size = 24 }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                <polyline points="21 15 16 10 5 21"></polyline>
             </svg>
         );
 
@@ -97,6 +106,13 @@
             <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <polyline points="3 6 5 6 21 6"></polyline>
                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            </svg>
+        );
+
+        const Edit = ({ size = 16 }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
             </svg>
         );
 
@@ -135,6 +151,7 @@
             const [status, setStatus] = useState({ show: false, message: '', type: '' });
             const [generatedPdfBlob, setGeneratedPdfBlob] = useState(null);
             const [suggestedFilename, setSuggestedFilename] = useState('');
+            const [renamingPhotoIndex, setRenamingPhotoIndex] = useState(null);
 
             // Generate suggested filename based on property address
             useEffect(() => {
@@ -232,6 +249,20 @@
                     ...prev,
                     attachments: prev.attachments.filter((_, i) => i !== index)
                 }));
+                showStatus('🗑️ File removed', 'success');
+            };
+
+            const renamePhoto = (index, newName) => {
+                if (!newName || !newName.trim()) return;
+                
+                setFormData(prev => ({
+                    ...prev,
+                    attachments: prev.attachments.map((photo, i) => 
+                        i === index ? { ...photo, name: newName.trim() } : photo
+                    )
+                }));
+                setRenamingPhotoIndex(null);
+                showStatus('✏️ File renamed', 'success');
             };
 
             // Helper function to correct image orientation
@@ -259,9 +290,12 @@
                     const response = await fetch('KW_Maine_Public_Records_Checklist.pdf');
                     const pdfBytes = await response.arrayBuffer();
                     
-                    const { PDFDocument, rgb } = PDFLib;
+                    const { PDFDocument, rgb, StandardFonts } = PDFLib;
                     const pdfDoc = await PDFDocument.load(pdfBytes);
                     const form = pdfDoc.getForm();
+
+                    // Load font for photo labels
+                    const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
                     // Helper functions
                     const setValue = (fieldName, value) => {
@@ -328,8 +362,9 @@
                     
                     setValue('4 COMPLETED BY', formData.completedBy);
 
-                    // Add attachments as pages
-                    for (const attachment of formData.attachments) {
+                    // Add attachments as pages with filenames
+                    for (let i = 0; i < formData.attachments.length; i++) {
+                        const attachment = formData.attachments[i];
                         try {
                             if (attachment.type.startsWith('image/')) {
                                 const correctedDataUrl = await correctImageOrientation(attachment.data);
@@ -340,21 +375,35 @@
                                 const page = pdfDoc.addPage();
                                 const pageWidth = page.getWidth();
                                 const pageHeight = page.getHeight();
+                                const margin = 50;
                                 
+                                // Add photo title at top
+                                page.drawText(`Attachment ${i + 1}: ${attachment.name}`, {
+                                    x: margin,
+                                    y: pageHeight - margin,
+                                    size: 10,
+                                    font: helveticaBold,
+                                    color: rgb(0, 0, 0)
+                                });
+                                
+                                // Calculate dimensions to fit image on page
+                                const availableHeight = pageHeight - (2 * margin) - 30; // Space for title
+                                const availableWidth = pageWidth - (2 * margin);
                                 const imageAspect = image.width / image.height;
-                                const pageAspect = pageWidth / pageHeight;
+                                const pageAspect = availableWidth / availableHeight;
                                 
                                 let drawWidth, drawHeight;
                                 if (imageAspect > pageAspect) {
-                                    drawWidth = pageWidth - 40;
+                                    drawWidth = availableWidth;
                                     drawHeight = drawWidth / imageAspect;
                                 } else {
-                                    drawHeight = pageHeight - 40;
+                                    drawHeight = availableHeight;
                                     drawWidth = drawHeight * imageAspect;
                                 }
                                 
+                                // Center the image
                                 const x = (pageWidth - drawWidth) / 2;
-                                const y = (pageHeight - drawHeight) / 2;
+                                const y = (pageHeight - drawHeight) / 2 - 15;
                                 
                                 page.drawImage(image, { x, y, width: drawWidth, height: drawHeight });
                             }
@@ -455,7 +504,7 @@
                                     <Home size={28} />
                                     <div>
                                         <h1 className="text-xl font-bold">Pocket PRC</h1>
-                                        <p className="text-xs opacity-75">v3.0.0</p>
+                                        <p className="text-xs opacity-75">v3.0.1</p>
                                     </div>
                                 </div>
                             </div>
@@ -758,40 +807,118 @@
                                 </label>
                             </div>
 
-                            {/* File Attachments */}
-                            <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 sm:p-6">
-                                <label className="cursor-pointer block">
-                                    <div className="text-center">
-                                        <Paperclip size={40} className="mx-auto text-gray-400 mb-2 sm:w-12 sm:h-12" />
-                                        <p className="font-semibold mb-1 text-sm sm:text-base">Tap to attach files</p>
-                                        <p className="text-xs sm:text-sm text-gray-600">Images & PDFs will be added as pages</p>
-                                    </div>
-                                    <input
-                                        type="file"
-                                        multiple
-                                        accept="image/*,.pdf"
-                                        onChange={handleFileUpload}
-                                        className="hidden"
-                                    />
+                            {/* File Attachments with Camera/Choose options */}
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    Add Photos/Documents
                                 </label>
+                                <div className="grid grid-cols-2 gap-3 mb-4">
+                                    {/* Take Photo Button */}
+                                    <label className="flex flex-col items-center justify-center gap-2 px-4 py-6 border-2 border-dashed border-gray-300 rounded-lg hover:border-red-500 hover:bg-red-50 transition-colors cursor-pointer">
+                                        <Camera size={32} className="text-gray-400" />
+                                        <span className="text-sm font-medium text-gray-700 text-center">
+                                            Take Photo
+                                        </span>
+                                        <input
+                                            type="file"
+                                            multiple
+                                            accept="image/*"
+                                            capture="environment"
+                                            onChange={handleFileUpload}
+                                            className="hidden"
+                                        />
+                                    </label>
+                                    
+                                    {/* Choose Files Button */}
+                                    <label className="flex flex-col items-center justify-center gap-2 px-4 py-6 border-2 border-dashed border-gray-300 rounded-lg hover:border-red-500 hover:bg-red-50 transition-colors cursor-pointer">
+                                        <ImageIcon size={32} className="text-gray-400" />
+                                        <span className="text-sm font-medium text-gray-700 text-center">
+                                            Choose Files
+                                        </span>
+                                        <input
+                                            type="file"
+                                            multiple
+                                            accept="image/*,.pdf"
+                                            onChange={handleFileUpload}
+                                            className="hidden"
+                                        />
+                                    </label>
+                                </div>
+                                <p className="text-xs text-gray-500 text-center mb-4">
+                                    Files will be included in PDF with their names
+                                </p>
 
+                                {/* Attached Files Gallery */}
                                 {formData.attachments.length > 0 && (
-                                    <div className="mt-4 space-y-2">
-                                        <p className="font-semibold text-sm">Attached ({formData.attachments.length}):</p>
-                                        {formData.attachments.map((att, i) => (
-                                            <div key={i} className="flex items-center justify-between p-2 bg-gray-50 rounded text-sm">
-                                                <div className="flex items-center gap-2 flex-1 min-w-0">
-                                                    <Paperclip size={14} className="flex-shrink-0" />
-                                                    <span className="truncate">{att.name}</span>
+                                    <div className="space-y-4">
+                                        <h3 className="font-semibold text-sm">Attached Files ({formData.attachments.length}):</h3>
+                                        
+                                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                                            {formData.attachments.map((attachment, index) => (
+                                                <div key={index} className="relative group">
+                                                    {attachment.type.startsWith('image/') ? (
+                                                        <img
+                                                            src={attachment.data}
+                                                            alt={attachment.name}
+                                                            className="w-full h-40 object-cover rounded-lg border-2 border-gray-200"
+                                                        />
+                                                    ) : (
+                                                        <div className="w-full h-40 flex items-center justify-center bg-gray-100 rounded-lg border-2 border-gray-200">
+                                                            <FileText size={48} className="text-gray-400" />
+                                                        </div>
+                                                    )}
+                                                    
+                                                    <button
+                                                        onClick={() => removeAttachment(index)}
+                                                        className="absolute top-2 right-2 bg-red-600 text-white p-2 rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-700"
+                                                        title="Remove file"
+                                                    >
+                                                        <Trash size={16} />
+                                                    </button>
+                                                    
+                                                    <button
+                                                        onClick={() => setRenamingPhotoIndex(index)}
+                                                        className="absolute top-2 right-14 bg-blue-600 text-white p-2 rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-blue-700"
+                                                        title="Rename file"
+                                                    >
+                                                        <Edit size={16} />
+                                                    </button>
+                                                    
+                                                    <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-60 text-white text-xs p-2 rounded-b-lg">
+                                                        {renamingPhotoIndex === index ? (
+                                                            <div className="flex gap-1">
+                                                                <input
+                                                                    type="text"
+                                                                    defaultValue={attachment.name || 'Unknown'}
+                                                                    onKeyDown={(e) => {
+                                                                        if (e.key === 'Enter') {
+                                                                            renamePhoto(index, e.target.value);
+                                                                        } else if (e.key === 'Escape') {
+                                                                            setRenamingPhotoIndex(null);
+                                                                        }
+                                                                    }}
+                                                                    onBlur={(e) => renamePhoto(index, e.target.value)}
+                                                                    autoFocus
+                                                                    className="flex-1 px-2 py-1 text-black rounded text-xs"
+                                                                    placeholder="Enter filename"
+                                                                />
+                                                            </div>
+                                                        ) : (
+                                                            <>
+                                                                <p className="truncate">{attachment.name || 'Unknown'}</p>
+                                                                <p className="text-gray-300">{((attachment.size || 0) / 1024).toFixed(1)} KB</p>
+                                                            </>
+                                                        )}
+                                                    </div>
                                                 </div>
-                                                <button
-                                                    onClick={() => removeAttachment(i)}
-                                                    className="text-red-600 hover:text-red-800 ml-2 flex-shrink-0"
-                                                >
-                                                    <Trash size={16} />
-                                                </button>
-                                            </div>
-                                        ))}
+                                            ))}
+                                        </div>
+
+                                        <div className="bg-red-50 p-4 rounded-lg border border-red-200">
+                                            <p className="text-sm text-red-800">
+                                                <strong>{formData.attachments.length}</strong> file(s) will be included in your PDF with their names
+                                            </p>
+                                        </div>
                                     </div>
                                 )}
                             </div>
@@ -845,7 +972,7 @@
 
                     {/* Footer */}
                     <div className="max-w-2xl mx-auto p-4 text-center text-sm text-gray-500">
-                        <p>Pocket PRC v3.0.0 • Keller Williams Maine</p>
+                        <p>Pocket PRC v3.0.1 • Keller Williams Maine</p>
                     </div>
                 </div>
             );
